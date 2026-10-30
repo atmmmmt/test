@@ -1,3 +1,3 @@
-import "./plan.css";
-import OfflinePlan from "@/components/OfflinePlan";
-export default function Home() { return <OfflinePlan />; }
+import "./enrollment.css";
+import EnrollmentApp from "@/components/EnrollmentApp";
+export default function Home(){return <EnrollmentApp/>;}
