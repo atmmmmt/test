@@ -1,8 +1,18 @@
-/* Offline-ready shell. All app files are cached during the first online visit. */
-const CACHE="umrah-live-v2";
+/* Cache the offline coordination guide and static assets while online. */
+const CACHE="umrah-live-v3";
 const SHELL=["/","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
 self.addEventListener("install",event=>{
- event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()));
+ event.waitUntil((async()=>{
+   const c=await caches.open(CACHE);
+   await c.addAll(SHELL);
+   // Next.js JS/CSS must also be cached before the first fully offline launch.
+   try{
+     const html=await (await c.match("/")).text();
+     const assets=[...html.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map(x=>x[1].replaceAll("&amp;","&"));
+     await Promise.allSettled([...new Set(assets)].map(url=>c.add(url)));
+   }catch(e){ /* do not block install; verify offline before travel */ }
+   await self.skipWaiting();
+ })());
 });
 self.addEventListener("activate",event=>{
  event.waitUntil(Promise.all([
@@ -11,16 +21,17 @@ self.addEventListener("activate",event=>{
  ]));
 });
 self.addEventListener("fetch",event=>{
- const req=event.request;
- if(req.method!=="GET"||new URL(req.url).origin!==self.location.origin)return;
+ const req=event.request,url=new URL(req.url);
+ if(req.method!=="GET"||url.origin!==self.location.origin)return;
  event.respondWith((async()=>{
-   const cache=await caches.open(CACHE);
+   const c=await caches.open(CACHE);
    if(req.mode==="navigate"){
-     try{const fresh=await fetch(req);if(fresh.ok)await cache.put(req,fresh.clone());return fresh;}
-     catch{return await cache.match(req)||await cache.match("/")||Response.error();}
+     try{const response=await fetch(req);if(response.ok)await c.put(req,response.clone());return response;}
+     catch{return await c.match(req)||await c.match("/")||Response.error();}
    }
-   const old=await cache.match(req);if(old)return old;
-   try{const fresh=await fetch(req);if(fresh.ok)await cache.put(req,fresh.clone());return fresh;}
+   const old=await c.match(req);
+   if(old)return old;
+   try{const response=await fetch(req);if(response.ok)await c.put(req,response.clone());return response;}
    catch{return Response.error();}
  })());
 });
