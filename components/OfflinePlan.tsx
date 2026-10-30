@@ -28,6 +28,7 @@ export default function OfflinePlan() {
   const [selected, setSelected] = useState(1);
   const [ready, setReady] = useState(false);
   useEffect(() => {
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{});
     try {
       const saved = JSON.parse(localStorage.getItem("umrah-offline-v1") || "{}");
       setNumber(String(saved.number ?? "")); setName(String(saved.name ?? ""));
