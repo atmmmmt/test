@@ -1,5 +1,5 @@
 /* Cache the offline coordination guide and static assets while online. */
-const CACHE="umrah-live-v3";
+const CACHE="umrah-live-v4";
 const SHELL=["/","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
 self.addEventListener("install",event=>{
  event.waitUntil((async()=>{
@@ -22,7 +22,7 @@ self.addEventListener("activate",event=>{
 });
 self.addEventListener("fetch",event=>{
  const req=event.request,url=new URL(req.url);
- if(req.method!=="GET"||url.origin!==self.location.origin)return;
+ if(req.method!=="GET"||url.origin!==self.location.origin||url.pathname.startsWith("/api/"))return;
  event.respondWith((async()=>{
    const c=await caches.open(CACHE);
    if(req.mode==="navigate"){
