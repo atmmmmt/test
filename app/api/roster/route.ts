@@ -40,12 +40,13 @@ export async function PATCH(req:Request) {
     const members=await listMembers();
     if(action==="auto") {
       const sizes=Array.from({length:GROUP_COUNT},(_,i)=>members.filter(m=>m.group===i+1).length);
-      const update=members.filter(m=>!m.group).map(m=>{
+      const update: typeof members = [];
+      for(const m of members.filter(m=>!m.group)){
         const next=sizes.indexOf(Math.min(...sizes));
-        if(sizes[next]>=MAX_GROUP)return null;
+        if(sizes[next]>=MAX_GROUP) break;
         sizes[next]++;
-        return {...m,group:next+1};
-      }).filter((m):m is typeof members[number]=>!!m);
+        update.push({...m,group:next+1});
+      }
       for(let i=0;i<update.length;i+=10) await Promise.all(update.slice(i,i+10).map(m=>saveMember(m)));
       return out({success:true,assigned:update.length});
     }
