@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "رفقة العمرة | بث الدعاء المباشر",
-  description: "تجربة بث صوت مباشر محلي بين الأجهزة بدون بيانات إنترنت عند توافر شبكة Wi-Fi محلية مشتركة.",
+  title: "رفقة العمرة | تنظيم البث المباشر بدون إنترنت",
+  description: "دليل تنظيم 100 معتمر في 7 مجموعات للصوت المباشر عبر تطبيق Murmur بلوتوث Mesh دون إنترنت أو نقطة اتصال؛ يتطلب تحميل التطبيق واختباره مسبقاً.",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "رفقة العمرة" },
   icons: {
