@@ -1,17 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-
 export const metadata: Metadata = {
-  title: "رفقة العمرة | تنظيم البث المباشر بدون إنترنت",
-  description: "دليل تنظيم 100 معتمر في 7 مجموعات للصوت المباشر عبر تطبيق Murmur بلوتوث Mesh دون إنترنت أو نقطة اتصال؛ يتطلب تحميل التطبيق واختباره مسبقاً.",
+  title: "رفقة العمرة | التسجيل وتوزيع المجموعات",
+  description: "تطبيق رفقة العمرة: كل شخص يسجل اسمه من رابط واحد، ومسؤول الرحلة يوزع المشاركين على المجموعات ويحفظ توزيعهم قبل السفر.",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "رفقة العمرة" },
-  icons: {
-    icon: "/icons/icon-192.png",
-    apple: "/icons/icon-192.png"
-  }
+  appleWebApp: {capable:true,statusBarStyle:"black-translucent",title:"رفقة العمرة"},
+  icons:{icon:"/icons/icon-192.png",apple:"/icons/icon-192.png"}
 };
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0c1420" };
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const viewport: Viewport = {width:"device-width",initialScale:1,themeColor:"#102b29"};
+export default function RootLayout({children}:{children:React.ReactNode}){
   return <html lang="ar" dir="rtl"><body>{children}</body></html>;
 }
