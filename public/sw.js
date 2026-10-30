@@ -1,34 +1,26 @@
-const CACHE = "umrah-live-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
-self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+/* Offline-ready shell. All app files are cached during the first online visit. */
+const CACHE="umrah-live-v2";
+const SHELL=["/","/manifest.webmanifest","/icons/icon-192.png","/icons/icon-512.png"];
+self.addEventListener("install",event=>{
+ event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()));
 });
-self.addEventListener("activate", event => {
-  event.waitUntil(Promise.all([
-    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))),
-    self.clients.claim()
-  ]));
+self.addEventListener("activate",event=>{
+ event.waitUntil(Promise.all([
+   caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))),
+   self.clients.claim()
+ ]));
 });
-self.addEventListener("fetch", event => {
-  if (event.request.method !== "GET") return;
-  const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return;
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE);
-    const cached = await cache.match(event.request);
-    if (cached) return cached;
-    try {
-      const response = await fetch(event.request);
-      if (response.ok && (response.type === "basic" || response.type === "cors")) {
-        cache.put(event.request, response.clone());
-      }
-      return response;
-    } catch {
-      if (event.request.mode === "navigate") {
-        const fallback = await cache.match("/");
-        if (fallback) return fallback;
-      }
-      return Response.error();
-    }
-  })());
+self.addEventListener("fetch",event=>{
+ const req=event.request;
+ if(req.method!=="GET"||new URL(req.url).origin!==self.location.origin)return;
+ event.respondWith((async()=>{
+   const cache=await caches.open(CACHE);
+   if(req.mode==="navigate"){
+     try{const fresh=await fetch(req);if(fresh.ok)await cache.put(req,fresh.clone());return fresh;}
+     catch{return await cache.match(req)||await cache.match("/")||Response.error();}
+   }
+   const old=await cache.match(req);if(old)return old;
+   try{const fresh=await fetch(req);if(fresh.ok)await cache.put(req,fresh.clone());return fresh;}
+   catch{return Response.error();}
+ })());
 });
