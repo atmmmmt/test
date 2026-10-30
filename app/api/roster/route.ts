@@ -13,7 +13,7 @@ async function bodyOf(req:Request) {
 export async function GET(req:Request) {
   if(!configured())return fail("تجهيز نظام التسجيل على الخادم لم يكتمل",503);
   if(!adminValid(req.headers.get("x-umrah-admin")||""))return fail("رمز المسؤول غير صحيح",401);
-  try {const people=await listMembers();return out({members:people.map(sanitize),total:people.length});}
+  try {const people=await listMembers();return out({members:people.map(sanitize),total:people.length,invite:process.env.UMRAH_JOIN_CODE});}
   catch{return fail("تعذر تحميل قائمة الأعضاء",503);}
 }
 export async function POST(req:Request) {
