@@ -1,3 +1,4 @@
+import { list } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { adminValid, configured, createMember, GROUP_COUNT, inviteValid, listMembers, loadMember, MAX_GROUP, sanitize, saveMember, validName } from "@/lib/roster";
 export const runtime = "nodejs";
@@ -24,8 +25,8 @@ export async function POST(req:Request) {
     const name=validName(data.name);
     if(!name)return fail("اكتب اسمك من حرفين إلى 45 حرفاً");
     if(typeof data.volunteered!=="boolean")return fail("اختر مشارك أو منظم");
-    const existing=await listMembers();
-    if(existing.length>=110)return fail("التسجيل مكتمل. تواصل مع مسؤول الرحلة.",409);
+    const registry=await list({prefix:"umrah-live/roster-v1/",limit:150});
+    if(registry.blobs.length>=110||registry.hasMore)return fail("التسجيل مكتمل. تواصل مع مسؤول الرحلة.",409);
     const created=await createMember(name,data.volunteered);
     return out({...created,success:true},201);
   } catch (e) {return fail(e instanceof SyntaxError?"البيانات غير صالحة":"تعذر إكمال التسجيل. تحقق من الإنترنت وأعد المحاولة.",503);}
