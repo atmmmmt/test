@@ -1,2 +1,3 @@
-import LiveApp from "@/components/LiveApp";
-export default function Home() { return <LiveApp />; }
+import "./group.css";
+import GroupApp from "@/components/GroupApp";
+export default function Home() { return <GroupApp />; }
