@@ -6,8 +6,8 @@ import { QRCodeSVG } from "qrcode.react";
 type Role = "speaker" | "relay" | "listener";
 type Phase = "idle" | "preparing" | "ready" | "connected" | "failed";
 type Signal = { v: 2; type: "offer" | "answer"; link: string; session: string; sdp: string };
-type Link = { id: string; pc: RTCPeerConnection; direction: "up" | "down"; label: string };
-type LinkInfo = { id: string; direction: "up" | "down"; state: string; label: string };
+type Link = { id: string; pc: RTCPeerConnection; direction: "up" | "down"; label: string; data?: RTCDataChannel; remoteRole?: Role; remoteName?: string; connectedAt?: number };
+type LinkInfo = { id: string; direction: "up" | "down"; state: string; label: string; remoteRole?: Role; remoteName?: string; connectedAt?: number };
 type Inbox = { id: string; total: number; chunks: Map<number, string> };
 const CHUNK = 430;
 const iceConfig: RTCConfiguration = { iceServers: [], iceCandidatePoolSize: 0 };
@@ -58,6 +58,8 @@ function messageOf(e: unknown) {
 }
 export default function GroupApp() {
   const [role,setRole] = useState<Role | null>(null);
+  const [displayName,setDisplayName] = useState("");
+  const identityRef = useRef("");
   const [session,setSession] = useState("");
   const [phase,setPhase] = useState<Phase>("idle");
   const [notice,setNotice] = useState("اختر دورك للبدء");
@@ -89,9 +91,17 @@ export default function GroupApp() {
   const video = useRef<HTMLVideoElement | null>(null);
   const camera = useRef<{stop:()=>void} | null>(null);
   const generated = useRef("");
+  identityRef.current=displayName;
+  const safeName = (name:string) => name.trim().replace(/\s+/g," ").slice(0,36);
+  const roleLabel = (r?:Role) => r==="speaker"?"الشيخ":r==="relay"?"جهاز وسيط":r==="listener"?"مستمع":"بانتظار التعريف";
+  const roleDefault = (r?:Role) => r==="speaker"?"الشيخ":r==="relay"?"مرافق المجموعة":"مشارك";
+  const announce = (channel:RTCDataChannel) => {
+    if(channel.readyState!=="open")return;
+    channel.send(JSON.stringify({t:"identity",name:safeName(identityRef.current)||roleDefault(roleCurrent.current||undefined),role:roleCurrent.current}));
+  };
   const closeCamera = useCallback(() => { camera.current?.stop(); camera.current=null; setScan(false); }, []);
   const refresh = useCallback(() => {
-    setLinks([...peers.current.values()].map(x => ({id:x.id,direction:x.direction,state:x.pc.connectionState,label:x.label})));
+    setLinks([...peers.current.values()].map(x => ({id:x.id,direction:x.direction,state:x.pc.connectionState,label:x.label,remoteRole:x.remoteRole,remoteName:x.remoteName,connectedAt:x.connectedAt})));
   },[]);
   const stop = useCallback(() => {
     closeCamera();
@@ -104,6 +114,7 @@ export default function GroupApp() {
     setOutbound([]);setPage(0);setError("");setQuality("");setSession("");setPhase("idle");
   },[closeCamera]);
   useEffect(() => {
+    try { setDisplayName(localStorage.getItem("umrah-display-name") || ""); } catch {}
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").then(async () => {
         await navigator.serviceWorker.ready;
@@ -125,13 +136,36 @@ export default function GroupApp() {
     },5000);
     return ()=>window.clearInterval(timer);
   },[]);
+  useEffect(()=>{
+    peers.current.forEach(x=>{if(x.data?.readyState==="open") announce(x.data);});
+  },[displayName,role]);
+  function changeName(value:string){
+    const name=value.slice(0,36);setDisplayName(name);
+    try{localStorage.setItem("umrah-display-name",name);}catch{}
+  }
   function choose(r:Role) {
     stop(); roleCurrent.current=r;setRole(r);
     setNotice(r==="speaker"?"افتح الميكروفون وابدأ الجلسة":r==="relay"?"امسح رمز الجهاز المصدر أولاً":"امسح رمز الشيخ أو جهاز وسيط للاستماع");
   }
+  function attachDataChannel(link:Link,channel:RTCDataChannel){
+    link.data=channel;
+    channel.onopen=()=>announce(channel);
+    channel.onmessage=event=>{
+      try{
+        const value=JSON.parse(String(event.data));
+        if(value?.t!=="identity")return;
+        if(!["speaker","relay","listener"].includes(value.role)||typeof value.name!=="string")return;
+        link.remoteRole=value.role as Role;
+        link.remoteName=safeName(value.name)||roleDefault(value.role as Role);
+        refresh();
+      }catch{}
+    };
+    channel.onclose=()=>refresh();
+  }
   function attachPeer(link:Link) {
     peers.current.set(link.id,link);refresh();
     link.pc.onconnectionstatechange = () => {
+      if(link.pc.connectionState==="connected"&&!link.connectedAt)link.connectedAt=Date.now();
       refresh();
       if (link.pc.connectionState==="connected") {setPhase("connected");setNotice("الاتصال المحلي يعمل");setNetwork("تم الاتصال الفعلي عبر WebRTC");}
       if (link.pc.connectionState==="failed" || link.pc.connectionState==="disconnected") {setNotice("انقطع أحد الاتصالات، أعد ربط الجهاز");setPhase("failed");}
@@ -154,7 +188,9 @@ export default function GroupApp() {
     setError("");setPhase("preparing");
     const id=key(),pc=new RTCPeerConnection(iceConfig);
     try {
-      attachPeer({id,pc,direction:"down",label:"مستمع / وسيط "+(peers.current.size+1)});
+      const link:Link={id,pc,direction:"down",label:"جهاز "+(peers.current.size+1)};
+      attachPeer(link);
+      attachDataChannel(link,pc.createDataChannel("umrah-presence"));
       stream.getAudioTracks().forEach(t=>pc.addTrack(t,stream));
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);await gather(pc);
       if(!pc.localDescription) throw Error("تعذر تكوين دعوة");
@@ -170,7 +206,9 @@ export default function GroupApp() {
       const pc=new RTCPeerConnection(iceConfig);
       try{
         upstream.current=s.link;sourceSession.current=s.session;setSession(s.session);
-        attachPeer({id:s.link,pc,direction:"up",label:"مصدر الصوت"});
+        const link:Link={id:s.link,pc,direction:"up",label:"مصدر الصوت"};
+        attachPeer(link);
+        pc.ondatachannel=event=>{if(event.channel.label==="umrah-presence")attachDataChannel(link,event.channel);};
         pc.ontrack=(event)=>{
           const stream=event.streams[0]||new MediaStream([event.track]);
           forwardedStream.current=stream;
@@ -235,6 +273,9 @@ export default function GroupApp() {
   }
   const down=links.filter(x=>x.direction==="down");
   const connected=down.filter(x=>x.state==="connected").length;
+  const relayCount=down.filter(x=>x.state==="connected"&&x.remoteRole==="relay").length;
+  const activeLinks=links.filter(x=>x.state==="connected");
+  const sources=links.filter(x=>x.direction==="up");
   const available=role==="speaker"?!!speakerStream.current:role==="relay"?!!forwardedStream.current:false;
   return <main className="group" dir="rtl">
     <header className="gc-header"><div className="gc-brand"><span className="gc-emblem">☪</span><div><strong>رفقة العمرة</strong><small>UMRAH CONNECT · LIVE</small></div></div><span className="gc-live"><i/> بث مباشر فقط</span></header>
@@ -243,6 +284,7 @@ export default function GroupApp() {
     <section className="gc-roles">
       {([{r:"speaker",icon:"🎙",title:"الشيخ",desc:"إرسال الدعاء مباشرة"},{r:"relay",icon:"🔗",title:"جهاز وسيط",desc:"استقبال الصوت وتمريره"},{r:"listener",icon:"🎧",title:"مستمع",desc:"سماع الدعاء المباشر"}] as const).map(x=><button key={x.r} className={"gc-role "+(role===x.r?"active":"")} onClick={()=>choose(x.r)}><span>{x.icon}</span><strong>{x.title}</strong><small>{x.desc}</small></button>)}
     </section>
+    {role&&<div className="gc-identity"><div className="gc-identity-icon" aria-hidden="true">✦</div><label htmlFor="umrah-name"><strong>اسمك ضمن المجموعة</strong><small>بيظهر للأشخاص المتصلين معك مباشرة</small></label><input id="umrah-name" autoComplete="nickname" maxLength={36} value={displayName} onChange={e=>changeName(e.target.value)} placeholder={roleDefault(role)} /></div>}
     {role&&<section className="gc-panel">
       <div className="gc-panelhead"><div><span className="gc-eyebrow">لوحة {role==="speaker"?"الشيخ":role==="relay"?"الجهاز الوسيط":"المستمع"}</span><h2>{role==="speaker"?"إدارة الصوت المباشر":role==="relay"?"استقبال وإعادة إرسال":"الاستماع للدعاء"}</h2></div><span className={"gc-status "+(links.some(p=>p.state==="connected")?"ok":"")}>{links.some(p=>p.state==="connected")?"متصل":"قيد التجهيز"}</span></div>
       {session&&<div className="gc-session">رقم الجلسة: <b dir="ltr">{session}</b></div>}
@@ -252,7 +294,14 @@ export default function GroupApp() {
       {role!=="speaker"&&<><audio ref={audio} controls playsInline autoPlay={false} className="gc-audio" /><button className="gc-main" disabled={!audioReady} onClick={()=>void play()}>{isPlaying?"🔊 الصوت يعمل — إعادة التشغيل":"🔊 تشغيل صوت الشيخ"}</button></>}
       {role==="relay"&&<p className="gc-note">أولاً امسح دعوة مصدر الصوت وردّ عليها. بعد الاتصال ووصول الصوت، بإمكانك إضافة مستمعين من جهازك.</p>}
       {role!=="listener"&&<button className="gc-outline" disabled={!available||!!waiting.current} onClick={()=>void addChild()}>＋ إضافة {role==="speaker"?"مستمع أو جهاز وسيط":"مستمع"} جديد</button>}
-      <div className="gc-stats"><div><strong>{connected}</strong><small>مستمعون متصلون مباشرة</small></div><div><strong>{down.length}</strong><small>روابط صادرة</small></div><div><strong>{role==="speaker"?speakerStream.current?"مفتوح":"مغلق":audioReady?"متاح":"بانتظار"}</strong><small>مصدر الصوت</small></div></div>
+      <div className="gc-stats"><div><strong>{connected}</strong><small>أجهزة متصلة مباشرة</small></div><div><strong>{relayCount}</strong><small>وسطاء متصلون مباشرة</small></div><div><strong>{role==="speaker"?speakerStream.current?muted?"مكتوم":"مباشر":"متوقف":audioReady?"متاح":"بانتظار"}</strong><small>حالة الصوت</small></div></div>
+      <section className="gc-presence" aria-label="لوحة الأشخاص المتصلين">
+        <div className="gc-presence-heading"><div><span className="gc-eyebrow">LIVE CONNECTIONS</span><h3>المتصلون والمرسلون</h3><p>الأشخاص المرتبطون بهاتفك مباشرة، مع حالة اتصال حقيقية.</p></div><div className="gc-presence-total"><b>{activeLinks.length}</b><span>اتصال مباشر</span></div></div>
+        {role==="speaker"&&speakerStream.current&&<div className="gc-broadcast-card"><div className="gc-wave" aria-hidden="true"><i/><i/><i/><i/><i/></div><div className="gc-broadcast-info"><span className="gc-person-label">المرسل الرئيسي</span><strong>{safeName(displayName)||"الشيخ"}</strong><small>{muted?"الميكروفون مكتوم":"ميكروفون الشيخ مفتوح"}</small></div><span className={"gc-pill "+(muted?"gc-pill-muted":"gc-pill-on")}>{muted?"مكتوم":"LIVE"}</span></div>}
+        {sources.length>0&&<div className="gc-presence-section"><div className="gc-section-head"><b>مصدر الصوت</b><span>{sources.filter(x=>x.state==="connected").length} متصل</span></div><div className="gc-people-grid">{sources.map(p=><div key={p.id} className="gc-person"><div className="gc-avatar gc-avatar-source">{(p.remoteName||"م").slice(0,2)}</div><div className="gc-person-details"><strong>{p.remoteName||"مصدر الصوت"}</strong><span>{roleLabel(p.remoteRole||"speaker")} · اتصال وارد</span></div><span className={"gc-dot-status "+(p.state==="connected"?"online":"offline")} title={p.state==="connected"?"متصل":"غير متصل"}/></div>)}</div></div>}
+        <div className="gc-presence-section"><div className="gc-section-head"><b>المستمعون والأجهزة الوسيطة</b><span>{connected} متصل · {down.length} رابط</span></div>{down.length===0?<div className="gc-presence-empty"><span className="gc-empty-symbol">◎</span><strong>لا يوجد مستمعون متصلون بعد</strong><small>{role==="listener"?"هذا الجهاز مخصص للاستماع فقط":"أضف جهازاً من خلال رمز QR ليظهر هنا عند الاتصال"}</small></div>:<div className="gc-people-grid">{down.map((p,i)=><div key={p.id} className="gc-person"><div className={"gc-avatar "+(p.remoteRole==="relay"?"gc-avatar-relay":"")}>{(p.remoteName||String(i+1).padStart(2,"0")).slice(0,2)}</div><div className="gc-person-details"><strong>{p.remoteName||p.label}</strong><span>{roleLabel(p.remoteRole)} · {p.state==="connected"?"متصل الآن":p.state==="failed"?"فشل الاتصال":p.state==="disconnected"?"انقطع الاتصال":"بانتظار الاتصال"}</span></div><span className={"gc-dot-status "+(p.state==="connected"?"online":"offline")} title={p.state==="connected"?"متصل":"غير متصل"}/></div>)}</div>}</div>
+        <p className="gc-presence-caption">البيانات تخص الروابط المباشرة لهذا الجهاز فقط، وليست إحصائية شاملة للمجموعة. أسماء الأدوار يعلنها كل جهاز بنفسه.</p>
+      </section>
       {quality&&<p className="gc-note">{quality}</p>}
       {outbound.length>0&&<section className="gc-qr"><h3>{role==="listener"||(!waiting.current&&role==="relay")?"اعرض الرد على الجهاز المصدر":"اعرض الدعوة للجهاز الآخر"}</h3><p>كل رمز QR جزء من معلومات الاتصال. انتقل للرمز التالي بعد مسحه من الهاتف الثاني.</p><div className="gc-qrcanvas"><QRCodeSVG value={outbound[page]} size={230} level="L" bgColor="#fff" fgColor="#11283c"/></div><div className="gc-pager"><button onClick={()=>setPage(i=>(i-1+outbound.length)%outbound.length)}>السابق</button><b>{page+1} / {outbound.length}</b><button onClick={()=>setPage(i=>(i+1)%outbound.length)}>التالي</button></div></section>}
       <div className="gc-divider"/>
@@ -262,9 +311,7 @@ export default function GroupApp() {
       {inboundProgress&&<p className="gc-progress">{inboundProgress}</p>}
       <button className="gc-textlink" onClick={()=>setShowAdvanced(v=>!v)}>{showAdvanced?"إخفاء الربط اليدوي":"الربط اليدوي باستخدام النسخ واللصق"}</button>
       {showAdvanced&&<div className="gc-manual">{generated.current&&<><textarea readOnly value={"UM2FULL:"+generated.current} aria-label="رمز الجهاز"/><button className="gc-soft" onClick={()=>void navigator.clipboard.writeText("UM2FULL:"+generated.current)}>نسخ رمز الجهاز</button></>}<textarea value={manual} onChange={e=>setManual(e.target.value)} placeholder="ألصق رمز الجهاز الآخر" aria-label="رمز الطرف الآخر"/><button className="gc-outline" onClick={()=>void callback.current(manual)}>استقبال الرمز</button></div>}
-      <div className="gc-divider"/><h3>الأجهزة المرتبطة</h3>
-      {links.length===0?<p className="gc-note">لم يتم ربط أي جهاز بعد.</p>:<div className="gc-peerlist">{links.map(p=><div key={p.id} className="gc-peer"><span>{p.direction==="up"?"↑":"↓"} {p.label}</span><span className={p.state==="connected"?"gc-green":""}>{p.state==="connected"?"متصل":p.state==="failed"?"فشل":p.state==="disconnected"?"انقطع":"جاري الربط"}</span></div>)}</div>}
-      <p className="gc-note">{network}</p>
+      <div className="gc-divider"/><p className="gc-note">{network}</p>
       {error&&<div className="gc-error" role="alert">⚠ {error}</div>}
       <button className="gc-exit" onClick={()=>{stop();setRole(null);roleCurrent.current=null;setNotice("اختر دورك للبدء");}}>إنهاء الجلسة وقطع الاتصالات</button>
     </section>}
